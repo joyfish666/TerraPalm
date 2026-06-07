@@ -1,0 +1,20 @@
+{
+  "name": "terrapalm",
+  "private": true,
+  "version": "1.0.0",
+  "description": "手势控制3D沙盘 - 通过摄像头手势操控3D地形",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.160.0",
+    "@mediapipe/hands": "^0.4.1675469240",
+    "@mediapipe/camera_utils": "^0.3.1675466862"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
