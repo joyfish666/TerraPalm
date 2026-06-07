@@ -108,7 +108,7 @@ const resetButton = new ResetButton(resetBtnEl, () => {
 
 // 帮助按钮点击事件
 helpBtnEl.addEventListener('click', () => {
-    helpOverlay.toggle(8000);
+    helpOverlay.toggle(5000);
 });
 
 // ========== 启动应用 ==========
@@ -121,8 +121,8 @@ async function startApp() {
         updateStatus('waiting', '等待手势...');
         console.log('[TerraPalm] 摄像头已启动，等待手势输入');
 
-        // 启动后自动显示帮助提示 8 秒
-        helpOverlay.show(8000);
+        // 启动后自动显示帮助提示 3 秒
+        helpOverlay.show(3000);
     } catch (error) {
         updateStatus('waiting', '启动失败: ' + error.message);
         console.error('[TerraPalm] 启动失败:', error);
