@@ -8,6 +8,12 @@ import { Smoothing } from '../utils/Smoothing.js';
  * - 手移动时，画面跟随移动
  * - 手停止/复位时，画面停止（不回退）
  *
+ * 缩放控制：状态机模式
+ * - 捏合状态：距离 < 0.06，持续捏合 = 缩小
+ * - 死区：距离 0.06-0.12，忽略（防止松手误触）
+ * - 张开状态：距离 > 0.12，持续张开 = 放大
+ * - 状态切换时忽略（防止松手变放大）
+ *
  * 控制映射：
  * - 左手张开 + 移动 → 平移（panX, panZ）
  * - 右手张开 + 左右摆动 → 旋转（rotateY）
@@ -19,8 +25,7 @@ export class GestureMapper {
         // 位置历史（用于计算速度，保留最近几帧）
         this.leftPosHistory = [];
         this.rightPosHistory = [];
-        this.pinchDistHistory = [];
-        this.historySize = 5; // 保留最近5帧
+        this.historySize = 5;
 
         // 累积的控制值
         this.panX = 0;
@@ -36,10 +41,23 @@ export class GestureMapper {
         // 灵敏度配置
         this.panSensitivity = 8;
         this.rotateSensitivity = 4;
-        this.zoomSensitivity = 10;
+        this.zoomSensitivity = 8;
 
         // 速度阈值（低于此值忽略，防止漂移）
         this.velocityThreshold = 0.001;
+
+        // ===== 缩放状态机 =====
+        this.pinchState = 'NEUTRAL'; // 'NEUTRAL' | 'PINCHING' | 'SPREADING'
+        this.prevPinchDist = null;
+        this.pinchDistHistory = [];
+
+        // 捏合/张开阈值
+        this.pinchThreshold = 0.06;   // 低于此值 = 捏合状态
+        this.spreadThreshold = 0.12;  // 高于此值 = 张开状态
+
+        // 状态切换冷却（防止快速切换误触）
+        this.lastStateChangeTime = 0;
+        this.stateChangeCooldown = 300; // 毫秒
 
         // 调试计数器
         this.debugCounter = 0;
@@ -103,7 +121,6 @@ export class GestureMapper {
 
     /**
      * 计算平均速度
-     * 使用最近几帧的位置变化计算平均速度
      * @param {Array} history - 位置历史
      * @returns {{ vx: number, vy: number }}
      */
@@ -116,7 +133,6 @@ export class GestureMapper {
         let totalDy = 0;
         let count = 0;
 
-        // 计算最近几帧的平均速度
         for (let i = 1; i < history.length; i++) {
             totalDx += history[i].x - history[i - 1].x;
             totalDy += history[i].y - history[i - 1].y;
@@ -130,24 +146,69 @@ export class GestureMapper {
     }
 
     /**
-     * 计算距离的平均变化速度
-     * @param {Array} history - 距离历史
-     * @returns {number}
+     * 更新缩放状态机
+     * @param {number} pinchDist - 当前捏合距离
+     * @returns {number} 缩放值（正值放大，负值缩小，0无操作）
      */
-    _calculateDistVelocity(history) {
-        if (history.length < 2) {
-            return 0;
+    _updateZoomState(pinchDist) {
+        const now = performance.now();
+        let rawZoom = 0;
+
+        // 确定当前距离属于哪个状态
+        let newState = this.pinchState;
+        if (pinchDist < this.pinchThreshold) {
+            newState = 'PINCHING';
+        } else if (pinchDist > this.spreadThreshold) {
+            newState = 'SPREADING';
+        } else {
+            newState = 'NEUTRAL';
         }
 
-        let totalDelta = 0;
-        let count = 0;
+        // 检查状态是否变化
+        if (newState !== this.pinchState) {
+            // 状态变化，检查冷却时间
+            if (now - this.lastStateChangeTime > this.stateChangeCooldown) {
+                this.pinchState = newState;
+                this.lastStateChangeTime = now;
+                // 状态切换时清空历史，避免旧数据影响
+                this.pinchDistHistory = [];
 
-        for (let i = 1; i < history.length; i++) {
-            totalDelta += history[i] - history[i - 1];
-            count++;
+                if (this.debugCounter % 60 === 0) {
+                    console.log(`[GestureMapper] 缩放状态切换: → ${newState}`);
+                }
+            }
+        } else {
+            // 状态未变化，计算缩放
+            this.pinchDistHistory.push(pinchDist);
+            if (this.pinchDistHistory.length > this.historySize) {
+                this.pinchDistHistory.shift();
+            }
+
+            // 计算距离变化速度
+            if (this.pinchDistHistory.length >= 2) {
+                let totalDelta = 0;
+                for (let i = 1; i < this.pinchDistHistory.length; i++) {
+                    totalDelta += this.pinchDistHistory[i] - this.pinchDistHistory[i - 1];
+                }
+                const velocity = totalDelta / (this.pinchDistHistory.length - 1);
+
+                // 根据状态和速度计算缩放
+                if (this.pinchState === 'PINCHING') {
+                    // 捏合状态：距离减小 = 缩小
+                    if (velocity < -0.001) {
+                        rawZoom = velocity * this.zoomSensitivity;
+                    }
+                } else if (this.pinchState === 'SPREADING') {
+                    // 张开状态：距离增大 = 放大
+                    if (velocity > 0.001) {
+                        rawZoom = velocity * this.zoomSensitivity;
+                    }
+                }
+                // NEUTRAL 状态：忽略
+            }
         }
 
-        return totalDelta / count;
+        return rawZoom;
     }
 
     /**
@@ -172,25 +233,20 @@ export class GestureMapper {
                 const pos = this._getPalmCenter(leftHand);
                 this._updateHistory(this.leftPosHistory, pos);
 
-                // 计算速度
                 const velocity = this._calculateVelocity(this.leftPosHistory);
 
-                // 只有速度超过阈值才响应
                 if (Math.abs(velocity.vx) > this.velocityThreshold || Math.abs(velocity.vy) > this.velocityThreshold) {
-                    rawPanX = -velocity.vx * this.panSensitivity; // 反向，使拖拽更自然
+                    rawPanX = -velocity.vx * this.panSensitivity;
                     rawPanZ = -velocity.vy * this.panSensitivity;
                 }
 
-                // 调试日志
                 if (this.debugCounter % 60 === 0) {
                     console.log(`[GestureMapper] 左手: 速度=(${velocity.vx.toFixed(4)}, ${velocity.vy.toFixed(4)})`);
                 }
             } else {
-                // 手握拳，清空历史
                 this.leftPosHistory = [];
             }
         } else {
-            // 手部丢失，清空历史
             this.leftPosHistory = [];
         }
 
@@ -198,18 +254,17 @@ export class GestureMapper {
         if (rightHand) {
             const isOpen = this._isOpenPalm(rightHand);
 
+            // 旋转控制（只有张开手掌才响应）
             if (isOpen) {
                 const pos = this._getPalmCenter(rightHand);
                 this._updateHistory(this.rightPosHistory, pos);
 
-                // 计算旋转速度
                 const velocity = this._calculateVelocity(this.rightPosHistory);
 
                 if (Math.abs(velocity.vx) > this.velocityThreshold) {
                     rawRotateY = -velocity.vx * this.rotateSensitivity;
                 }
 
-                // 调试日志
                 if (this.debugCounter % 60 === 0) {
                     console.log(`[GestureMapper] 右手: 旋转速度=${velocity.vx.toFixed(4)}`);
                 }
@@ -217,24 +272,18 @@ export class GestureMapper {
                 this.rightPosHistory = [];
             }
 
-            // 缩放控制（捏合手势）
+            // 缩放控制（状态机模式）
             const pinchDist = this._getPinchDistance(rightHand);
-            this._updateHistory(this.pinchDistHistory, pinchDist);
+            rawZoom = this._updateZoomState(pinchDist);
 
-            const pinchVelocity = this._calculateDistVelocity(this.pinchDistHistory);
-
-            if (Math.abs(pinchVelocity) > 0.002) {
-                rawZoom = -pinchVelocity * this.zoomSensitivity;
-            }
-
-            // 调试日志
             if (this.debugCounter % 60 === 0) {
-                console.log(`[GestureMapper] 捏合: 距离=${pinchDist.toFixed(3)}, 速度=${pinchVelocity.toFixed(4)}`);
+                console.log(`[GestureMapper] 捏合: 距离=${pinchDist.toFixed(3)}, 状态=${this.pinchState}`);
             }
         } else {
-            // 手部丢失，清空历史
+            // 手部丢失，重置状态
             this.rightPosHistory = [];
             this.pinchDistHistory = [];
+            this.pinchState = 'NEUTRAL';
         }
 
         // 应用平滑
@@ -258,6 +307,8 @@ export class GestureMapper {
         this.leftPosHistory = [];
         this.rightPosHistory = [];
         this.pinchDistHistory = [];
+        this.pinchState = 'NEUTRAL';
+        this.prevPinchDist = null;
         this.panX = 0;
         this.panZ = 0;
         this.rotateY = 0;
