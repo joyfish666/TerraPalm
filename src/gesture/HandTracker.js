@@ -1,8 +1,8 @@
-import { Hands } from '@mediapipe/hands';
+import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
 /**
  * 手部追踪器
- * 封装 MediaPipe Hands，提供摄像头初始化和手部关键点检测
+ * 使用 MediaPipe Tasks Vision API 进行手部关键点检测
  * 支持同时检测双手，并区分左右手
  */
 export class HandTracker {
@@ -15,53 +15,66 @@ export class HandTracker {
         this.onResults = onResults;
         this.isRunning = false;
         this.stream = null;
+        this.handLandmarker = null;
         this.isModelReady = false;
 
-        console.log('[HandTracker] 初始化 MediaPipe Hands...');
-
-        // 初始化 MediaPipe Hands
-        this.hands = new Hands({
-            locateFile: (file) => {
-                const url = `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-                return url;
-            }
-        });
-
-        // 配置检测参数
-        this.hands.setOptions({
-            maxNumHands: 2,              // 最多检测两只手
-            modelComplexity: 1,          // 模型复杂度（0或1）
-            minDetectionConfidence: 0.5, // 检测置信度阈值
-            minTrackingConfidence: 0.5   // 最低追踪置信度
-        });
-
-        // 绑定结果处理回调
-        this.hands.onResults(this._processResults.bind(this));
-
-        console.log('[HandTracker] 初始化完成，等待模型加载...');
+        console.log('[HandTracker] 初始化 MediaPipe Tasks Vision...');
     }
 
     /**
-     * 处理 MediaPipe 检测结果
-     * 注意：摄像头画面是镜像的，MediaPipe 的左右标签需要反转
-     * @param {Object} results - MediaPipe 原始结果
+     * 初始化 MediaPipe HandLandmarker
+     * 加载 WASM 运行时和模型文件
+     */
+    async _initModel() {
+        try {
+            console.log('[HandTracker] 加载 WASM 运行时...');
+
+            // 加载 WASM 运行时
+            const vision = await FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+            );
+
+            console.log('[HandTracker] WASM 运行时加载完成，创建 HandLandmarker...');
+
+            // 创建 HandLandmarker 实例
+            this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
+                    delegate: 'GPU'  // 使用 GPU 加速
+                },
+                runningMode: 'VIDEO',
+                numHands: 2,
+                minHandDetectionConfidence: 0.5,
+                minHandPresenceConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            this.isModelReady = true;
+            console.log('[HandTracker] HandLandmarker 创建成功，模型已就绪');
+        } catch (error) {
+            console.error('[HandTracker] 模型初始化失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 处理检测结果
+     * @param {Object} results - HandLandmarker 检测结果
      */
     _processResults(results) {
         let leftHand = null;
         let rightHand = null;
 
-        if (!this.isModelReady) {
-            this.isModelReady = true;
-            console.log('[HandTracker] 模型已就绪，开始检测手势');
-        }
+        if (results.landmarks && results.landmarks.length > 0) {
+            for (let i = 0; i < results.landmarks.length; i++) {
+                const landmarks = results.landmarks[i];
+                const handedness = results.handednesses[i];
 
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            for (let i = 0; i < results.multiHandLandmarks.length; i++) {
-                const landmarks = results.multiHandLandmarks[i];
-                const handedness = results.multiHandedness[i];
+                // 获取手部类别（Left 或 Right）
+                const label = handedness[0].categoryName;
 
                 // 摄像头镜像：MediaPipe 标签的 "Left" 实际是用户的右手
-                if (handedness.label === 'Left') {
+                if (label === 'Left') {
                     rightHand = landmarks;
                 } else {
                     leftHand = landmarks;
@@ -84,9 +97,12 @@ export class HandTracker {
         if (this.isRunning) return;
 
         try {
+            // 先初始化模型
+            await this._initModel();
+
             console.log('[HandTracker] 请求摄像头权限...');
 
-            // 直接使用 getUserMedia 获取摄像头流
+            // 获取摄像头流
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     width: { ideal: 640 },
@@ -133,7 +149,7 @@ export class HandTracker {
      * 使用 requestAnimationFrame 循环处理每一帧
      */
     _processFrame() {
-        if (!this.isRunning) return;
+        if (!this.isRunning || !this.isModelReady) return;
 
         // 确保视频已经准备好
         if (this.videoElement.readyState < 2) {
@@ -142,17 +158,19 @@ export class HandTracker {
         }
 
         try {
-            // 发送当前帧到 MediaPipe
-            this.hands.send({ image: this.videoElement }).then(() => {
-                // 请求下一帧
-                requestAnimationFrame(() => this._processFrame());
-            }).catch(err => {
-                console.error('[HandTracker] 帧处理错误:', err);
-                // 即使出错也继续下一帧
-                requestAnimationFrame(() => this._processFrame());
-            });
+            // 使用 HandLandmarker 检测当前帧
+            const results = this.handLandmarker.detectForVideo(
+                this.videoElement,
+                performance.now()
+            );
+
+            // 处理检测结果
+            this._processResults(results);
+
+            // 请求下一帧
+            requestAnimationFrame(() => this._processFrame());
         } catch (err) {
-            console.error('[HandTracker] 帧处理异常:', err);
+            console.error('[HandTracker] 帧处理错误:', err);
             requestAnimationFrame(() => this._processFrame());
         }
     }
@@ -172,6 +190,12 @@ export class HandTracker {
         // 清空视频源
         if (this.videoElement) {
             this.videoElement.srcObject = null;
+        }
+
+        // 关闭 HandLandmarker
+        if (this.handLandmarker) {
+            this.handLandmarker.close();
+            this.handLandmarker = null;
         }
 
         console.log('[HandTracker] 摄像头已停止');
