@@ -43,8 +43,8 @@ function updateStatus(state, text) {
 const sceneManager = new SceneManager(sceneContainer);
 sceneManager.init();
 
-// 创建地形并添加到场景的地形组
-const terrain = new Terrain(sceneManager.scene, {
+// 创建地形并添加到地形组（不是直接添加到场景）
+const terrain = new Terrain(sceneManager.getTerrainGroup(), {
     size: 10,
     resolution: 128,
     heightScale: 3,
