@@ -124,15 +124,24 @@ async function startApp() {
         // 启动后自动显示帮助提示 8 秒
         helpOverlay.show(8000);
     } catch (error) {
-        updateStatus('waiting', '摄像头启动失败');
+        updateStatus('waiting', '启动失败: ' + error.message);
         console.error('[TerraPalm] 启动失败:', error);
 
         // 显示错误提示
         helpOverlay.show();
         const helpContent = helpOverlayEl.querySelector('.help-content h2');
         if (helpContent) {
-            helpContent.textContent = '⚠️ 摄像头访问失败';
+            helpContent.textContent = '⚠️ 启动失败';
             helpContent.style.color = '#f44336';
+        }
+
+        // 显示详细错误信息
+        const helpText = helpOverlayEl.querySelector('.help-content');
+        if (helpText) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = 'margin-top: 20px; padding: 15px; background: #ffebee; border-radius: 8px; color: #c62828; text-align: left; font-size: 14px;';
+            errorDiv.textContent = error.message || '未知错误';
+            helpText.appendChild(errorDiv);
         }
     }
 }
@@ -159,6 +168,7 @@ window.TerraPalm = {
     getStatus: () => ({
         frameCount,
         isHandDetected,
-        isRunning: handTracker.isRunning
+        isRunning: handTracker.isRunning,
+        isModelReady: handTracker.isModelReady
     })
 };

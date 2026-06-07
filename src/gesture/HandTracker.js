@@ -31,26 +31,46 @@ export class HandTracker {
 
             // 加载 WASM 运行时
             const vision = await FilesetResolver.forVisionTasks(
-                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
             );
 
-            console.log('[HandTracker] WASM 运行时加载完成，创建 HandLandmarker...');
+            console.log('[HandTracker] WASM 运行时加载完成');
 
-            // 创建 HandLandmarker 实例
-            this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
-                    delegate: 'GPU'  // 使用 GPU 加速
-                },
-                runningMode: 'VIDEO',
-                numHands: 2,
-                minHandDetectionConfidence: 0.5,
-                minHandPresenceConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
+            // 尝试使用 GPU，如果失败则回退到 CPU
+            let delegate = 'GPU';
+            try {
+                console.log('[HandTracker] 尝试创建 HandLandmarker (GPU)...');
+                this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+                        delegate: 'GPU'
+                    },
+                    runningMode: 'VIDEO',
+                    numHands: 2,
+                    minHandDetectionConfidence: 0.5,
+                    minHandPresenceConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                console.log('[HandTracker] GPU 模式创建成功');
+            } catch (gpuError) {
+                console.warn('[HandTracker] GPU 模式失败，尝试 CPU 模式:', gpuError.message);
+                delegate = 'CPU';
+                this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+                        delegate: 'CPU'
+                    },
+                    runningMode: 'VIDEO',
+                    numHands: 2,
+                    minHandDetectionConfidence: 0.5,
+                    minHandPresenceConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                console.log('[HandTracker] CPU 模式创建成功');
+            }
 
             this.isModelReady = true;
-            console.log('[HandTracker] HandLandmarker 创建成功，模型已就绪');
+            console.log(`[HandTracker] 模型已就绪 (${delegate} 模式)`);
         } catch (error) {
             console.error('[HandTracker] 模型初始化失败:', error);
             throw error;
@@ -98,7 +118,9 @@ export class HandTracker {
 
         try {
             // 先初始化模型
+            console.log('[HandTracker] 开始初始化模型...');
             await this._initModel();
+            console.log('[HandTracker] 模型初始化完成');
 
             console.log('[HandTracker] 请求摄像头权限...');
 
@@ -139,7 +161,7 @@ export class HandTracker {
 
             console.log('[HandTracker] 摄像头已启动，开始检测手势');
         } catch (error) {
-            console.error('[HandTracker] 摄像头启动失败:', error);
+            console.error('[HandTracker] 启动失败:', error);
             throw error;
         }
     }
