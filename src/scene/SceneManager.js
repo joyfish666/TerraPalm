@@ -137,14 +137,18 @@ export class SceneManager {
 
     /**
      * 将手势控制指令应用到地形组
-     * @param {{ panX: number, panZ: number, rotateY: number, zoom: number }} controls
+     * @param {{ panX: number, panZ: number, cameraY: number, rotateY: number, zoom: number }} controls
      */
     applyControls(controls) {
         if (this.isResetting || !this.isInitialized) return;
 
-        // 平移：在 XZ 平面移动地形组
+        // 平移：在 X 平面移动地形组（左右）
         this.terrainGroup.position.x += controls.panX;
-        this.terrainGroup.position.z += controls.panZ;
+
+        // 相机高度：上下移动
+        if (controls.cameraY) {
+            this.camera.position.y = Math.max(3, Math.min(20, this.camera.position.y + controls.cameraY));
+        }
 
         // 旋转：绕 Y 轴旋转地形组
         this.terrainGroup.rotation.y += controls.rotateY;

@@ -4,7 +4,8 @@ import { Smoothing } from '../utils/Smoothing.js';
  * 手势映射器 v3
  *
  * 控制方案：
- * - 左手张开移动 → 地形平移
+ * - 左手张开左右移动 → 地形左右平移
+ * - 左手张开上下移动 → 画面高度（相机上下）
  * - 左手握拳 → 放大（优先于平移）
  * - 右手张开左右移动 → 绕中心轴旋转（左移=顺时针，右移=逆时针）
  * - 右手握拳 → 缩小（优先于旋转）
@@ -16,25 +17,28 @@ export class GestureMapper {
         // 位置历史（用于计算速度）
         this.leftPosHistory = [];
         this.rightPosHistory = [];
-        this.historySize = 3; // 减少历史帧数，提高响应速度
+        this.historySize = 3;
 
         // 累积的控制值
         this.panX = 0;
         this.panZ = 0;
+        this.cameraY = 0;  // 相机高度变化
         this.rotateY = 0;
         this.zoom = 0;
 
-        // 平滑器（降低平滑系数，提高响应性）
+        // 平滑器
         this.panSmoother = new Smoothing(0.2);
-        this.rotateSmoother = new Smoothing(0.2);
+        this.cameraYSmoother = new Smoothing(0.15);
+        this.rotateSmoother = new Smoothing(0.15);
         this.zoomSmoother = new Smoothing(0.1);
 
         // 灵敏度
         this.panSensitivity = 8;
-        this.rotateSensitivity = 15; // 提高旋转灵敏度
+        this.cameraYSensitivity = 5;  // 相机高度灵敏度
+        this.rotateSensitivity = 5;   // 降低旋转灵敏度
         this.zoomSensitivity = 0.02;
 
-        // 速度阈值（降低阈值，更容易触发）
+        // 速度阈值
         this.velocityThreshold = 0.0003;
 
         // 状态追踪
@@ -43,6 +47,7 @@ export class GestureMapper {
         this.prevHasLeft = null;
         this.prevHasRight = null;
         this.prevPanActive = false;
+        this.prevCameraYActive = false;
         this.prevRotateActive = false;
         this.prevZoomInActive = false;
         this.prevZoomOutActive = false;
@@ -117,7 +122,7 @@ export class GestureMapper {
      */
     update(leftHand, rightHand) {
         let rawPanX = 0;
-        let rawPanZ = 0;
+        let rawCameraY = 0;
         let rawRotateY = 0;
         let rawZoom = 0;
 
@@ -151,18 +156,36 @@ export class GestureMapper {
 
                 const velocity = this._calculateVelocity(this.leftPosHistory);
 
-                if (Math.abs(velocity.vx) > this.velocityThreshold || Math.abs(velocity.vy) > this.velocityThreshold) {
+                // 左右移动 → 地形左右平移
+                if (Math.abs(velocity.vx) > this.velocityThreshold) {
                     rawPanX = -velocity.vx * this.panSensitivity;
-                    rawPanZ = -velocity.vy * this.panSensitivity;
 
                     if (!this.prevPanActive) {
-                        console.log(`[Left] ✅ 平移开始`);
+                        console.log(`[Left] ✅ 左右平移开始`);
                         this.prevPanActive = true;
                     }
                 } else {
                     if (this.prevPanActive) {
-                        console.log(`[Left] ⏸️ 平移停止`);
+                        console.log(`[Left] ⏸️ 左右平移停止`);
                         this.prevPanActive = false;
+                    }
+                }
+
+                // 上下移动 → 画面高度（相机Y轴）
+                // 注意：图像坐标系Y轴向下，所以需要反转
+                // 手向上移动 → vy < 0 → cameraY > 0 → 相机升高
+                // 手向下移动 → vy > 0 → cameraY < 0 → 相机降低
+                if (Math.abs(velocity.vy) > this.velocityThreshold) {
+                    rawCameraY = velocity.vy * this.cameraYSensitivity;
+
+                    if (!this.prevCameraYActive) {
+                        console.log(`[Left] ✅ 上下移动开始`);
+                        this.prevCameraYActive = true;
+                    }
+                } else {
+                    if (this.prevCameraYActive) {
+                        console.log(`[Left] ⏸️ 上下移动停止`);
+                        this.prevCameraYActive = false;
                     }
                 }
 
@@ -182,12 +205,18 @@ export class GestureMapper {
                 if (this.prevPanActive) {
                     this.prevPanActive = false;
                 }
+                if (this.prevCameraYActive) {
+                    this.prevCameraYActive = false;
+                }
             }
         } else {
             this.leftPosHistory = [];
             this.prevLeftOpen = null;
             if (this.prevPanActive) {
                 this.prevPanActive = false;
+            }
+            if (this.prevCameraYActive) {
+                this.prevCameraYActive = false;
             }
             if (this.prevZoomInActive) {
                 console.log(`[Zoom] 📈 放大结束（左手丢失）`);
@@ -210,27 +239,14 @@ export class GestureMapper {
 
                 const velocity = this._calculateVelocity(this.rightPosHistory);
 
-                // 每30帧输出一次右手详细状态
-                if (this.debugCounter % 30 === 0) {
-                    console.log(`[Right] 位置:(${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}), 速度:(${velocity.vx.toFixed(5)}, ${velocity.vy.toFixed(5)}), 历史:${this.rightPosHistory.length}`);
-                }
-
                 if (Math.abs(velocity.vx) > this.velocityThreshold) {
-                    // 速度方向：
-                    // 用户手向左移动 → 摄像头画面中x增大（镜像）→ velocity.vx > 0
-                    // 用户手向右移动 → 摄像头画面中x减小（镜像）→ velocity.vx < 0
-                    // 用户期望：向左=顺时针(负rotateY)，向右=逆时针(正rotateY)
-                    // 所以：rawRotateY = -velocity.vx
+                    // 手向左移动 → 摄像头画面中x增大（镜像）→ velocity.vx > 0
+                    // 用户期望：向左=顺时针(负rotateY)
                     rawRotateY = -velocity.vx * this.rotateSensitivity;
 
                     if (!this.prevRotateActive) {
                         console.log(`[Right] ✅ 旋转开始`);
                         this.prevRotateActive = true;
-                    }
-
-                    // 每30帧输出旋转值
-                    if (this.debugCounter % 30 === 0) {
-                        console.log(`[Right] 旋转值: ${rawRotateY.toFixed(4)} (负=顺时针, 正=逆时针)`);
                     }
                 } else {
                     if (this.prevRotateActive) {
@@ -270,13 +286,14 @@ export class GestureMapper {
 
         // 应用平滑
         this.panX = this.panSmoother.smooth(this.panX, rawPanX);
-        this.panZ = this.panSmoother.smooth(this.panZ, rawPanZ);
+        this.cameraY = this.cameraYSmoother.smooth(this.cameraY, rawCameraY);
         this.rotateY = this.rotateSmoother.smooth(this.rotateY, rawRotateY);
         this.zoom = this.zoomSmoother.smooth(this.zoom, rawZoom);
 
         return {
             panX: this.panX,
-            panZ: this.panZ,
+            panZ: 0,  // 不再使用Z轴平移
+            cameraY: this.cameraY,
             rotateY: this.rotateY,
             zoom: this.zoom
         };
@@ -290,6 +307,7 @@ export class GestureMapper {
         this.rightPosHistory = [];
         this.panX = 0;
         this.panZ = 0;
+        this.cameraY = 0;
         this.rotateY = 0;
         this.zoom = 0;
 
@@ -298,6 +316,7 @@ export class GestureMapper {
         this.prevHasLeft = null;
         this.prevHasRight = null;
         this.prevPanActive = false;
+        this.prevCameraYActive = false;
         this.prevRotateActive = false;
         this.prevZoomInActive = false;
         this.prevZoomOutActive = false;
