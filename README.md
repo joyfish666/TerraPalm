@@ -1,75 +1,221 @@
-# 项目规划文档：手势控制3D沙盘
+# TerraPalm - Gesture-Controlled 3D Sandbox
 
-## 一、基本原则与约束
+# TerraPalm - 手势控制3D沙盘
 
-1. **项目类型**：手势控制3D沙盘。用户通过摄像头实时手势操作，控制3D地形图的视角与交互。
-2. **核心目标**：为教学或演示场景提供一个直观、新颖的3D地形展示与交互工具。
-3. **使用场景**：桌面电脑浏览器（Chrome/Edge等主流浏览器），需在摄像头可用环境下运行。
-4. **目标用户**：教师、培训师、演讲者，用于课堂或会议中演示地理/地形知识。
-5. **技术限定**：完全在客户端（浏览器）运行，无需后端服务器或数据库。所有计算（手势识别、3D渲染）在用户本地设备完成。
-6. **开发优先级**：功能可用性 > 界面美观度。优先实现稳定的手势控制和3D展示，再优化视觉细节。
+[English](#english) | [中文](#中文)
 
-## 二、功能规范
+---
 
-### 功能清单（共6项）
+## English
 
-| 编号 | 功能名称 | 描述 |
-|------|----------|------|
-| F1 | **手势识别** | 通过电脑摄像头实时捕捉并识别左手和右手的手势关键点（基于MediaPipe Hands，21个关键点/手） |
-| F2 | **左手控制（平移）** | 左手手势控制3D地形图在水平平面（X轴、Z轴）上移动。具体映射：手掌移动方向对应地形平移方向 |
-| F3 | **右手控制（缩放与旋转）** | 右手手势控制地形放大/缩小（握拳缩放模式）以及绕Y轴旋转（手掌左右摆动对应旋转） |
-| F4 | **3D地形显示** | 在页面中渲染一个可交互的3D地形图。地形模型建议使用高度图生成，包含山川、谷地等典型地形特征 |
-| F5 | **视角快速复位** | 点击按钮或触发特定手势，将3D地形视角恢复到默认的最佳观察位置（如正上方俯视或45度透视） |
-| F6 | **操作帮助提示** | 在页面角落或启动时显示简短的手势操作指引（如文字/图标提示“左手：移动地形”、“右手：缩放/旋转”） |
+### Introduction
 
-### 功能交互说明
+TerraPalm is a gesture-controlled 3D terrain sandbox that allows users to interact with a 3D landscape using hand gestures captured by a webcam. Built with Three.js for 3D rendering and MediaPipe for hand tracking, it provides an intuitive and immersive way to explore terrain data.
 
-- **启动流程**：用户打开网页 → 弹出摄像头权限请求 → 授权后显示视频画面（可作为背景或小窗预览） → 识别到手部关键点后激活控制 → 显示操作帮助提示。
-- **手势映射规则**（仅供参考，可调整）：
-  - 左手：张开手掌，移动手掌 → 地形平移；握拳 → 停止控制。
-  - 右手：张开手掌，左右移动 → 旋转；两根手指捏合拉开 → 缩放。
-- **复位功能**：建议在界面角落放置一个“复位”按钮，同时可设计一个特定手势（如双手同时握拳保持2秒）触发复位。
-- **帮助提示**：建议使用半透明浮层，在启动后5-10秒自动淡出，用户也可随时点击“？”按钮重新显示。
+### Features
 
-## 三、技术栈推荐
+- **Real-time Hand Tracking**: Uses MediaPipe Tasks Vision API for accurate hand landmark detection
+- **Left Hand Controls**:
+  - Open palm left/right → Pan terrain horizontally
+  - Open palm up/down → Adjust camera height
+  - Fist → Zoom in
+- **Right Hand Controls**:
+  - Open palm left/right → Rotate terrain around center axis
+  - Fist → Zoom out
+- **Priority System**: Zoom (fist) takes priority over pan/rotate (open palm)
+- **Smooth Animations**: Exponential smoothing for fluid gesture responses
+- **Procedural Terrain**: Generates realistic terrain using fractal Brownian motion (fBm) noise
+- **Height-based Coloring**: Terrain colors from green valleys to white snow peaks
+- **Reset View**: One-click return to default camera position
 
-### 核心框架与库
+### Tech Stack
 
-| 层级 | 技术选型 | 说明 |
-|------|----------|------|
-| **3D渲染引擎** | **Three.js** (r150+) | 最流行的Web 3D库，社区资源丰富，教程、示例完善，适合教学演示项目 |
-| **手势识别** | **MediaPipe Hands** (通过@mediapipe/hands或@mediapipe/tasks-vision) | Google出品，精准度高，提供21个手部关键点，支持左右手区分，延迟低 |
-| **媒体流获取** | WebRTC原生API (`navigator.mediaDevices.getUserMedia`) | 标准浏览器API，无需额外库，用于获取摄像头视频流 |
-| **UI与交互** | 原生HTML/CSS/JavaScript | 项目规模适中，无需引入重型UI框架。可考虑使用**Tailwind CSS**简化样式编写 |
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| 3D Rendering | Three.js (r160+) | WebGL-based 3D scene |
+| Hand Tracking | MediaPipe Tasks Vision | 21-point hand landmark detection |
+| Camera | WebRTC | Real-time webcam access |
+| Build Tool | Vite | Fast development and bundling |
+| Language | Vanilla JavaScript | No framework dependencies |
 
-### 开发工具建议
+### Quick Start
 
-- **包管理器**：npm 或 yarn
-- **模块打包器**：Vite（轻量、快速，适合Three.js项目）
-- **地形数据生成**：可选用现成高度图（如`png`灰度图），或用`perlin-noise`算法程序化生成随机地形
-- **代码编辑器**：Visual Studio Code
+```bash
+# Install dependencies
+npm install
 
-### 开发流程建议
+# Start development server
+npm run dev
 
-1. **阶段一：基础环境搭建**
-   - 使用Vite初始化项目
-   - 安装Three.js、MediaPipe Hands相关依赖
-   - 实现摄像头调用与画面显示
+# Build for production
+npm run build
 
-2. **阶段二：手势识别集成**
-   - 接入MediaPipe Hands，实时获取左右手关键点坐标
-   - 定义并测试手势映射逻辑（移动、旋转、缩放）
+# Preview production build
+npm run preview
+```
 
-3. **阶段三：3D地形渲染**
-   - 基于高度图或噪声算法生成地形网格
-   - 加载基础颜色纹理或使用顶点着色（海拔越高颜色越深）
-   - 实现地形光照
+Open `http://localhost:3000` in Chrome or Edge browser. Allow camera permissions when prompted.
 
-4. **阶段四：交互绑定**
-   - 将手势数据映射为Three.js相机（或场景组）的位置、旋转、缩放变化
-   - 平滑处理手势输入（插值或阻尼效果），避免画面抖动
+### Project Structure
 
-5. **阶段五：辅助功能**
-   - 实现视角复位功能（动画过渡）
-   - 添加操作帮助提示UI
-   - 优化整体交互体验
+```
+TerraPalm/
+├── index.html                  # Entry HTML page with styles
+├── package.json                # Dependencies and scripts
+├── vite.config.js              # Vite build configuration
+├── .gitignore                  # Git ignore rules
+├── ARCHITECTURE.md             # Detailed architecture documentation
+├── README.md                   # This file
+└── src/
+    ├── main.js                 # Application entry point
+    ├── gesture/                # Gesture recognition module
+    │   ├── HandTracker.js      # MediaPipe Hands wrapper
+    │   └── GestureMapper.js    # Gesture → control mapping
+    ├── scene/                  # 3D scene module
+    │   ├── SceneManager.js     # Three.js scene manager
+    │   └── Terrain.js          # Procedural terrain generator
+    ├── ui/                     # UI components
+    │   ├── HelpOverlay.js      # Help tips overlay
+    │   └── ResetButton.js      # View reset button
+    └── utils/                  # Utility functions
+        └── Smoothing.js        # Input smoothing (EMA)
+```
+
+### Gesture Controls
+
+| Gesture | Action | Priority |
+|---------|--------|----------|
+| 👈👉 Left hand open, move left/right | Pan terrain | Low |
+| 👆👇 Left hand open, move up/down | Adjust camera height | Low |
+| ✊ Left hand fist | Zoom in | High |
+| 👈👉 Right hand open, move left/right | Rotate terrain | Low |
+| ✊ Right hand fist | Zoom out | High |
+
+### Development
+
+For detailed architecture and implementation notes, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+### Browser Requirements
+
+- Chrome 90+ or Edge 90+
+- Webcam access required
+- WebGL 2.0 support
+
+### License
+
+MIT
+
+---
+
+## 中文
+
+### 简介
+
+TerraPalm 是一个手势控制的3D地形沙盘，用户可以通过摄像头捕捉的手势与3D地形进行交互。使用 Three.js 进行3D渲染，MediaPipe 进行手部追踪，提供直观沉浸式的地形探索体验。
+
+### 功能特性
+
+- **实时手部追踪**：使用 MediaPipe Tasks Vision API 进行精准的手部关键点检测
+- **左手控制**：
+  - 张开手掌左右移动 → 平移地形
+  - 张开手掌上下移动 → 调整视角高度
+  - 握拳 → 放大
+- **右手控制**：
+  - 张开手掌左右移动 → 绕中心轴旋转地形
+  - 握拳 → 缩小
+- **优先级系统**：缩放（握拳）优先于平移/旋转（张开手掌）
+- **平滑动画**：指数移动平均（EMA）实现流畅的手势响应
+- **程序化地形**：使用分形布朗运动（fBm）噪声生成逼真地形
+- **基于高度的着色**：地形颜色从绿色谷地到白色雪峰渐变
+- **视角复位**：一键恢复默认相机位置
+
+### 技术栈
+
+| 层级 | 技术 | 用途 |
+|------|------|------|
+| 3D渲染 | Three.js (r160+) | WebGL 3D场景 |
+| 手部追踪 | MediaPipe Tasks Vision | 21点手部关键点检测 |
+| 摄像头 | WebRTC | 实时摄像头访问 |
+| 构建工具 | Vite | 快速开发和打包 |
+| 语言 | 原生 JavaScript | 无框架依赖 |
+
+### 快速开始
+
+```bash
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev
+
+# 构建生产版本
+npm run build
+
+# 预览生产构建
+npm run preview
+```
+
+在 Chrome 或 Edge 浏览器中打开 `http://localhost:3000`，按提示允许摄像头权限。
+
+### 项目结构
+
+```
+TerraPalm/
+├── index.html                  # 入口 HTML 页面（含样式）
+├── package.json                # 依赖和脚本配置
+├── vite.config.js              # Vite 构建配置
+├── .gitignore                  # Git 忽略规则
+├── ARCHITECTURE.md             # 详细架构文档
+├── README.md                   # 本文件
+└── src/
+    ├── main.js                 # 应用入口文件
+    ├── gesture/                # 手势识别模块
+    │   ├── HandTracker.js      # MediaPipe Hands 封装
+    │   └── GestureMapper.js    # 手势→控制指令映射
+    ├── scene/                  # 3D场景模块
+    │   ├── SceneManager.js     # Three.js 场景管理器
+    │   └── Terrain.js          # 程序化地形生成器
+    ├── ui/                     # UI组件
+    │   ├── HelpOverlay.js      # 帮助提示浮层
+    │   └── ResetButton.js      # 视角复位按钮
+    └── utils/                  # 工具函数
+        └── Smoothing.js        # 输入平滑处理（EMA）
+```
+
+### 手势控制
+
+| 手势 | 操作 | 优先级 |
+|------|------|--------|
+| 👈👉 左手张开，左右移动 | 平移地形 | 低 |
+| 👆👇 左手张开，上下移动 | 调整视角高度 | 低 |
+| ✊ 左手握拳 | 放大 | 高 |
+| 👈👉 右手张开，左右移动 | 旋转地形 | 低 |
+| ✊ 右手握拳 | 缩小 | 高 |
+
+### 开发文档
+
+详细的架构和实现说明请参阅 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+
+### 浏览器要求
+
+- Chrome 90+ 或 Edge 90+
+- 需要摄像头权限
+- 支持 WebGL 2.0
+
+### 许可证
+
+MIT
+
+---
+
+## Acknowledgments / 致谢
+
+- [Three.js](https://threejs.org/) - 3D rendering library
+- [MediaPipe](https://mediapipe.dev/) - Hand tracking solution
+- [Vite](https://vitejs.dev/) - Build tool
+
+---
+
+**Note / 注意**: This project requires a webcam and works best in well-lit environments.
+
+此项目需要摄像头，在光线良好的环境下效果最佳。
