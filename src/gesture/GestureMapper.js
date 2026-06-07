@@ -30,20 +30,21 @@ export class GestureMapper {
 
         // 灵敏度
         this.panSensitivity = 8;
-        this.rotateSensitivity = 4;
+        this.rotateSensitivity = 6;
         this.zoomSensitivity = 15;
 
         // 速度阈值
-        this.velocityThreshold = 0.001;
+        this.velocityThreshold = 0.0005;
 
         // ===== 双手缩放状态 =====
-        this.twoHandZoomActive = false;  // 是否正在双手缩放
-        this.prevHandDistance = null;     // 上一帧双手距离
-        this.handDistanceHistory = [];    // 双手距离历史
-        this.zoomLockTimer = null;        // 缩放锁定计时器
+        this.twoHandZoomActive = false;
+        this.prevHandDistance = null;
+        this.handDistanceHistory = [];
+        this.zoomLockTimer = null;
 
         // 调试
         this.debugCounter = 0;
+        this.logThrottle = 30; // 每30帧输出一次日志
     }
 
     /**
@@ -75,37 +76,24 @@ export class GestureMapper {
 
     /**
      * 判断掌心是否朝向摄像头
-     *
-     * 原理：当掌心朝向摄像头时，手指指尖在水平方向上展开
-     * 当掌心朝向面部（背对摄像头）时，手指指尖会重叠或收拢
-     *
-     * 使用手腕到中指MCP的向量与手腕到食指MCP的向量叉积来判断
      */
     _isPalmFacingCamera(landmarks) {
-        // 手腕 (0) → 中指 MCP (9)
+        const indexMcp = landmarks[5];
+        const pinkyMcp = landmarks[17];
         const wrist = landmarks[0];
         const middleMcp = landmarks[9];
-        const indexMcp = landmarks[5];
 
-        // 计算手掌宽度（食指MCP到小指MCP的距离）
-        const pinkyMcp = landmarks[17];
         const palmWidth = Math.sqrt(
             Math.pow(indexMcp.x - pinkyMcp.x, 2) +
             Math.pow(indexMcp.y - pinkyMcp.y, 2)
         );
 
-        // 计算手掌"深度"（手腕到中指MCP的距离）
         const palmDepth = Math.sqrt(
             Math.pow(wrist.x - middleMcp.x, 2) +
             Math.pow(wrist.y - middleMcp.y, 2)
         );
 
-        // 当掌心朝向摄像头时，手掌宽度相对较大（手指展开）
-        // 当掌心背向摄像头时，手掌宽度较小（手指重叠）
-        // 使用宽度/深度比值来判断
         const ratio = palmWidth / (palmDepth + 0.001);
-
-        // 阈值：ratio > 0.5 认为掌心朝向摄像头
         return ratio > 0.5;
     }
 
@@ -157,35 +145,29 @@ export class GestureMapper {
      * @returns {boolean} 是否正在双手缩放
      */
     _handleTwoHandZoom(leftHand, rightHand) {
-        // 两只手都必须张开
         const leftOpen = this._isOpenPalm(leftHand);
         const rightOpen = this._isOpenPalm(rightHand);
 
         if (!leftOpen || !rightOpen) {
+            if (this.debugCounter % this.logThrottle === 0) {
+                console.log(`[Zoom] 双手未全部张开: 左=${leftOpen}, 右=${rightOpen}`);
+            }
             this._resetTwoHandZoom();
             return false;
         }
 
-        // 检测掌心方向
         const leftFacingCamera = this._isPalmFacingCamera(leftHand);
         const rightFacingCamera = this._isPalmFacingCamera(rightHand);
-
-        // 双手掌心都朝向摄像头（推出去放大）
-        // 或者双掌心都朝向面部（收回来缩小）
-        // 简化：只要双手都张开，就检测距离变化
-        // 掌心方向用于后续增强
 
         const leftPos = this._getPalmCenter(leftHand);
         const rightPos = this._getPalmCenter(rightHand);
         const currentDistance = this._getHandDistance(leftPos, rightPos);
 
-        // 更新距离历史
         this.handDistanceHistory.push(currentDistance);
         if (this.handDistanceHistory.length > this.historySize) {
             this.handDistanceHistory.shift();
         }
 
-        // 计算距离变化速度
         if (this.handDistanceHistory.length >= 2) {
             let totalDelta = 0;
             for (let i = 1; i < this.handDistanceHistory.length; i++) {
@@ -193,41 +175,34 @@ export class GestureMapper {
             }
             const velocity = totalDelta / (this.handDistanceHistory.length - 1);
 
-            // 距离增大 → 放大（双手向外推开）
-            // 距离缩小 → 缩小（双手向内收拢）
             if (Math.abs(velocity) > 0.002) {
                 this.twoHandZoomActive = true;
 
-                // 判断掌心方向来决定是否响应
-                // 双手掌心朝摄像头 + 距离增大 = 放大
-                // 双手掌心朝面部 + 距离缩小 = 缩小
-                // 简化：只要距离变化明显就响应
                 if (velocity > 0.002) {
-                    // 双手向外推 → 放大
                     this.zoom = this.zoomSmoother.smooth(this.zoom, velocity * this.zoomSensitivity);
+                    if (this.debugCounter % this.logThrottle === 0) {
+                        console.log(`[Zoom] 📈 放大中: 距离=${currentDistance.toFixed(3)}, 速度=${velocity.toFixed(4)}`);
+                    }
                 } else if (velocity < -0.002) {
-                    // 双手向内收 → 缩小
                     this.zoom = this.zoomSmoother.smooth(this.zoom, velocity * this.zoomSensitivity);
+                    if (this.debugCounter % this.logThrottle === 0) {
+                        console.log(`[Zoom] 📉 缩小中: 距离=${currentDistance.toFixed(3)}, 速度=${velocity.toFixed(4)}`);
+                    }
                 }
 
-                // 重置锁定计时器
                 if (this.zoomLockTimer) {
                     clearTimeout(this.zoomLockTimer);
                 }
                 this.zoomLockTimer = setTimeout(() => {
                     this.twoHandZoomActive = false;
                     this.zoomLockTimer = null;
+                    console.log('[Zoom] 🔓 双手缩放锁定解除');
                 }, 500);
-
-                if (this.debugCounter % 30 === 0) {
-                    console.log(`[GestureMapper] 双手缩放: 距离=${currentDistance.toFixed(3)}, 速度=${velocity.toFixed(4)}, 朝摄像头=[${leftFacingCamera}, ${rightFacingCamera}]`);
-                }
 
                 return true;
             }
         }
 
-        // 距离变化不明显，但双手都在，保持锁定一段时间
         if (this.twoHandZoomActive) {
             return true;
         }
@@ -242,7 +217,6 @@ export class GestureMapper {
         this.handDistanceHistory = [];
         this.prevHandDistance = null;
 
-        // 延迟解除锁定，避免快速切换
         if (this.zoomLockTimer) {
             clearTimeout(this.zoomLockTimer);
         }
@@ -263,14 +237,24 @@ export class GestureMapper {
         this.debugCounter++;
 
         const hasBothHands = leftHand !== null && rightHand !== null;
+        const hasLeftHand = leftHand !== null;
+        const hasRightHand = rightHand !== null;
+
+        // 每帧输出手部检测状态
+        if (this.debugCounter % this.logThrottle === 0) {
+            console.log(`[Gesture] ─── 帧 ${this.debugCounter} ───`);
+            console.log(`[Gesture] 检测状态: 左手=${hasLeftHand}, 右手=${hasRightHand}, 双手=${hasBothHands}`);
+            console.log(`[Gesture] 当前锁定: 双手缩放=${this.twoHandZoomActive}`);
+        }
 
         // ===== 双手缩放检测 =====
         if (hasBothHands) {
             const isZooming = this._handleTwoHandZoom(leftHand, rightHand);
 
             if (isZooming) {
-                // 双手缩放激活，锁住单手控制
-                // 不处理平移和旋转
+                if (this.debugCounter % this.logThrottle === 0) {
+                    console.log(`[Gesture] 🔒 双手缩放激活，单手控制已锁定`);
+                }
                 return {
                     panX: this.panX,
                     panZ: this.panZ,
@@ -285,8 +269,12 @@ export class GestureMapper {
         // ===== 单手控制（仅在双手缩放未激活时）=====
         if (!this.twoHandZoomActive) {
             // === 左手：平移控制 ===
-            if (leftHand) {
+            if (hasLeftHand) {
                 const isOpen = this._isOpenPalm(leftHand);
+
+                if (this.debugCounter % this.logThrottle === 0) {
+                    console.log(`[Left] 手掌张开: ${isOpen}`);
+                }
 
                 if (isOpen) {
                     const pos = this._getPalmCenter(leftHand);
@@ -294,20 +282,43 @@ export class GestureMapper {
 
                     const velocity = this._calculateVelocity(this.leftPosHistory);
 
+                    if (this.debugCounter % this.logThrottle === 0) {
+                        console.log(`[Left] 位置: (${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}), 速度: (${velocity.vx.toFixed(5)}, ${velocity.vy.toFixed(5)})`);
+                        console.log(`[Left] 历史帧数: ${this.leftPosHistory.length}, 阈值: ${this.velocityThreshold}`);
+                    }
+
                     if (Math.abs(velocity.vx) > this.velocityThreshold || Math.abs(velocity.vy) > this.velocityThreshold) {
                         rawPanX = -velocity.vx * this.panSensitivity;
                         rawPanZ = -velocity.vy * this.panSensitivity;
+
+                        if (this.debugCounter % this.logThrottle === 0) {
+                            console.log(`[Left] ✅ 平移生效: panX=${rawPanX.toFixed(4)}, panZ=${rawPanZ.toFixed(4)}`);
+                        }
+                    } else {
+                        if (this.debugCounter % this.logThrottle === 0) {
+                            console.log(`[Left] ⏸️ 速度低于阈值，不响应`);
+                        }
                     }
                 } else {
                     this.leftPosHistory = [];
+                    if (this.debugCounter % this.logThrottle === 0) {
+                        console.log(`[Left] ✊ 握拳状态，清空历史`);
+                    }
                 }
             } else {
                 this.leftPosHistory = [];
+                if (this.debugCounter % this.logThrottle === 0) {
+                    console.log(`[Left] ❌ 未检测到左手`);
+                }
             }
 
             // === 右手：旋转控制 ===
-            if (rightHand) {
+            if (hasRightHand) {
                 const isOpen = this._isOpenPalm(rightHand);
+
+                if (this.debugCounter % this.logThrottle === 0) {
+                    console.log(`[Right] 手掌张开: ${isOpen}`);
+                }
 
                 if (isOpen) {
                     const pos = this._getPalmCenter(rightHand);
@@ -315,14 +326,33 @@ export class GestureMapper {
 
                     const velocity = this._calculateVelocity(this.rightPosHistory);
 
+                    if (this.debugCounter % this.logThrottle === 0) {
+                        console.log(`[Right] 位置: (${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}), 速度: (${velocity.vx.toFixed(5)}, ${velocity.vy.toFixed(5)})`);
+                        console.log(`[Right] 历史帧数: ${this.rightPosHistory.length}, 阈值: ${this.velocityThreshold}`);
+                    }
+
                     if (Math.abs(velocity.vx) > this.velocityThreshold) {
                         rawRotateY = -velocity.vx * this.rotateSensitivity;
+
+                        if (this.debugCounter % this.logThrottle === 0) {
+                            console.log(`[Right] ✅ 旋转生效: rotateY=${rawRotateY.toFixed(4)}`);
+                        }
+                    } else {
+                        if (this.debugCounter % this.logThrottle === 0) {
+                            console.log(`[Right] ⏸️ 速度低于阈值，不响应`);
+                        }
                     }
                 } else {
                     this.rightPosHistory = [];
+                    if (this.debugCounter % this.logThrottle === 0) {
+                        console.log(`[Right] ✊ 握拳状态，清空历史`);
+                    }
                 }
             } else {
                 this.rightPosHistory = [];
+                if (this.debugCounter % this.logThrottle === 0) {
+                    console.log(`[Right] ❌ 未检测到右手`);
+                }
             }
         }
 
@@ -330,6 +360,11 @@ export class GestureMapper {
         this.panX = this.panSmoother.smooth(this.panX, rawPanX);
         this.panZ = this.panSmoother.smooth(this.panZ, rawPanZ);
         this.rotateY = this.rotateSmoother.smooth(this.rotateY, rawRotateY);
+
+        if (this.debugCounter % this.logThrottle === 0) {
+            console.log(`[Gesture] 输出: panX=${this.panX.toFixed(4)}, panZ=${this.panZ.toFixed(4)}, rotateY=${this.rotateY.toFixed(4)}, zoom=${this.zoom.toFixed(4)}`);
+            console.log(`[Gesture] ─────────────────────`);
+        }
 
         return {
             panX: this.panX,
@@ -357,5 +392,7 @@ export class GestureMapper {
             clearTimeout(this.zoomLockTimer);
             this.zoomLockTimer = null;
         }
+
+        console.log('[Gesture] 🔄 所有状态已重置');
     }
 }

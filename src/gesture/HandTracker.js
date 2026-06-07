@@ -86,19 +86,34 @@ export class HandTracker {
         let rightHand = null;
 
         if (results.landmarks && results.landmarks.length > 0) {
+            // 输出检测到的手部数量和详情
+            console.log(`[HandTracker] 检测到 ${results.landmarks.length} 只手`);
+
             for (let i = 0; i < results.landmarks.length; i++) {
                 const landmarks = results.landmarks[i];
                 const handedness = results.handednesses[i];
 
                 // 获取手部类别（Left 或 Right）
                 const label = handedness[0].categoryName;
+                const score = handedness[0].score;
+
+                console.log(`[HandTracker] 手 ${i}: 类别=${label}, 置信度=${score.toFixed(3)}, 手腕位置=(${landmarks[0].x.toFixed(3)}, ${landmarks[0].y.toFixed(3)})`);
 
                 // 摄像头镜像：MediaPipe 标签的 "Left" 实际是用户的右手
                 if (label === 'Left') {
                     rightHand = landmarks;
+                    console.log(`[HandTracker] → 分配为右手（镜像）`);
                 } else {
                     leftHand = landmarks;
+                    console.log(`[HandTracker] → 分配为左手（镜像）`);
                 }
+            }
+        } else {
+            // 每100帧输出一次未检测日志，避免日志过多
+            if (this._noHandCounter === undefined) this._noHandCounter = 0;
+            this._noHandCounter++;
+            if (this._noHandCounter % 100 === 0) {
+                console.log(`[HandTracker] 未检测到手部 (${this._noHandCounter} 帧)`);
             }
         }
 

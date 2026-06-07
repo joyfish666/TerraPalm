@@ -97,6 +97,18 @@ const handTracker = new HandTracker(videoElement, ({ leftHand, rightHand }) => {
 
     // 应用控制到场景
     sceneManager.applyControls(controls);
+
+    // 每30帧输出一次控制应用日志
+    if (frameCount % 30 === 0) {
+        const hasSignificantChange = Math.abs(controls.panX) > 0.001 ||
+            Math.abs(controls.panZ) > 0.001 ||
+            Math.abs(controls.rotateY) > 0.001 ||
+            Math.abs(controls.zoom) > 0.001;
+
+        if (hasSignificantChange) {
+            console.log(`[Scene] 应用控制: panX=${controls.panX.toFixed(4)}, panZ=${controls.panZ.toFixed(4)}, rotateY=${controls.rotateY.toFixed(4)}, zoom=${controls.zoom.toFixed(4)}`);
+        }
+    }
 });
 
 // ========== 初始化 UI 组件 ==========
