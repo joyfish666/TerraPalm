@@ -22,6 +22,7 @@ const statusText = document.getElementById('status-text');
 // ========== 状态管理 ==========
 let isHandDetected = false;
 let handLostTimer = null;
+let frameCount = 0;
 
 /**
  * 更新状态指示器
@@ -56,13 +57,20 @@ terrain.create();
 const gestureMapper = new GestureMapper();
 
 const handTracker = new HandTracker(videoElement, ({ leftHand, rightHand }) => {
+    frameCount++;
+
+    // 每 100 帧输出一次日志
+    if (frameCount % 100 === 0) {
+        console.log(`[TerraPalm] 已处理 ${frameCount} 帧`);
+    }
+
     // 更新状态指示
     const hasAnyHand = leftHand !== null || rightHand !== null;
 
     if (hasAnyHand) {
         if (!isHandDetected) {
             isHandDetected = true;
-            updateStatus('detecting', '手势检测中...');
+            console.log('[TerraPalm] 检测到手势！');
         }
 
         // 清除手部丢失定时器
@@ -106,15 +114,15 @@ helpBtnEl.addEventListener('click', () => {
 // ========== 启动应用 ==========
 async function startApp() {
     updateStatus('waiting', '正在启动摄像头...');
+    console.log('[TerraPalm] 正在启动应用...');
 
     try {
         await handTracker.start();
         updateStatus('waiting', '等待手势...');
+        console.log('[TerraPalm] 摄像头已启动，等待手势输入');
 
         // 启动后自动显示帮助提示 8 秒
         helpOverlay.show(8000);
-
-        console.log('[TerraPalm] 应用启动成功');
     } catch (error) {
         updateStatus('waiting', '摄像头启动失败');
         console.error('[TerraPalm] 启动失败:', error);
@@ -146,5 +154,11 @@ window.TerraPalm = {
     handTracker,
     gestureMapper,
     helpOverlay,
-    resetButton
+    resetButton,
+    // 调试方法
+    getStatus: () => ({
+        frameCount,
+        isHandDetected,
+        isRunning: handTracker.isRunning
+    })
 };

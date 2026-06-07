@@ -39,6 +39,9 @@ export class GestureMapper {
 
         // 移动阈值（低于此值忽略，避免漂移）
         this.moveThreshold = 0.002;
+
+        // 调试计数器
+        this.debugCounter = 0;
     }
 
     /**
@@ -50,7 +53,7 @@ export class GestureMapper {
     _isOpenPalm(landmarks) {
         // 指尖索引：食指(8)、中指(12)、无名指(16)、小指(20)
         const tips = [8, 12, 16, 20];
-        // 对应的 MCP 关节索引：食指(5)、中指(9)、无名指(13)、小指(9)
+        // 对应的 MCP 关节索引
         const mcps = [5, 9, 13, 17];
 
         let extendedCount = 0;
@@ -104,9 +107,16 @@ export class GestureMapper {
         let rawRotateY = 0;
         let rawZoom = 0;
 
+        this.debugCounter++;
+
         // === 左手处理：平移控制 ===
         if (leftHand) {
             const isOpen = this._isOpenPalm(leftHand);
+
+            // 每 60 帧输出一次调试信息
+            if (this.debugCounter % 60 === 0) {
+                console.log(`[GestureMapper] 左手: 张开=${isOpen}, 位置=(${leftHand[0].x.toFixed(3)}, ${leftHand[0].y.toFixed(3)})`);
+            }
 
             if (isOpen) {
                 const pos = this._getPalmCenter(leftHand);
@@ -135,6 +145,12 @@ export class GestureMapper {
         // === 右手处理：旋转和缩放控制 ===
         if (rightHand) {
             const isOpen = this._isOpenPalm(rightHand);
+            const pinchDist = this._getPinchDistance(rightHand);
+
+            // 每 60 帧输出一次调试信息
+            if (this.debugCounter % 60 === 0) {
+                console.log(`[GestureMapper] 右手: 张开=${isOpen}, 捏合距离=${pinchDist.toFixed(3)}`);
+            }
 
             // 旋转：张开手掌左右移动
             if (isOpen) {
@@ -152,8 +168,6 @@ export class GestureMapper {
             }
 
             // 缩放：拇指和食指的捏合距离变化
-            const pinchDist = this._getPinchDistance(rightHand);
-
             if (this.prevPinchDist !== null) {
                 const pinchDelta = pinchDist - this.prevPinchDist;
 
